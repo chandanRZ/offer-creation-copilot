@@ -1,21 +1,21 @@
-import pandas as pd
-from io import BytesIO
+# import pandas as pd
+# from io import BytesIO
 
-def parse_offer_excel(uploaded_file):
-    try:
-        df = pd.read_excel(uploaded_file)
-        return df
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        return None
+# def parse_offer_excel(uploaded_file):
+#     try:
+#         df = pd.read_excel(uploaded_file)
+#         return df
+#     except Exception as e:
+#         print(f"Error reading file: {e}")
+#         return None
 
-def generate_excel_from_rows(rows):
-    df = pd.DataFrame(rows)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name="Offer Construct")
-    output.seek(0)
-    return output
+# def generate_excel_from_rows(rows):
+#     df = pd.DataFrame(rows)
+#     output = BytesIO()
+#     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+#         df.to_excel(writer, index=False, sheet_name="Offer Construct")
+#     output.seek(0)
+#     return output
 
     
 # import streamlit as st
@@ -78,3 +78,72 @@ def generate_excel_from_rows(rows):
 #             st.info("This is a fallback sample. Check your file input for issues.")
 #     else:
 #         st.info("Please enter brand name to proceed.")
+
+import pandas as pd
+import re
+import difflib
+
+REQUIRED_HEADERS = ["Tenure", "Subvention", "Offer Code"]
+HEADER_ALIASES = {
+    "tenure": "Tenure",
+    "emi tenure": "Tenure",
+    "brand emi tenures": "Tenure",
+    "sub": "Subvention",
+    "subvention": "Subvention",
+    "offer code": "Offer Code",
+    "code": "Offer Code"
+}
+
+def normalize_header(header):
+    header = header.strip().lower()
+    return HEADER_ALIASES.get(header, header.title())
+
+def parse_offer_excel(file):
+    try:
+        df = pd.read_excel(file, sheet_name=0, header=None)
+
+        # Detect if file is in key-value format (2-column layout)
+        if df.shape[1] == 2 and df.shape[0] > 1:
+            # Convert to dict for fuzzy mapping
+            raw_dict = dict(zip(df.iloc[:, 0].astype(str), df.iloc[:, 1].astype(str)))
+            parsed_data = {}
+            missing_headers = []
+
+            for req in REQUIRED_HEADERS:
+                found = False
+                for key in raw_dict:
+                    norm_key = normalize_header(key)
+                    if norm_key == req:
+                        parsed_data[req] = raw_dict[key]
+                        found = True
+                        break
+                if not found:
+                    missing_headers.append(req)
+
+            if missing_headers:
+                raise ValueError(f"Missing headers: {', '.join(missing_headers)}")
+
+            return parsed_data, []
+
+        # Else try as standard table with headers
+        df = pd.read_excel(file)
+        original_headers = df.columns.tolist()
+
+        header_map = {}
+        for col in original_headers:
+            norm_col = normalize_header(str(col))
+            for key, canonical in HEADER_ALIASES.items():
+                if key in str(col).strip().lower():
+                    header_map[col] = canonical
+
+        canonical_headers = list(set(header_map.values()))
+        missing_headers = [h for h in REQUIRED_HEADERS if h not in canonical_headers]
+
+        if missing_headers:
+            raise ValueError(f"Missing headers: {', '.join(missing_headers)}")
+
+        df.rename(columns=header_map, inplace=True)
+        return df, []
+
+    except Exception as e:
+        return None, [f"❌ Error reading file: {str(e)}"]
